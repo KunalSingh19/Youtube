@@ -35,7 +35,7 @@ This project contains two scripts:
 ### Usage
 
 ```bash
-node your_script.js [input_file]
+node script.js [input_file]
 ```
 
 - `input_file` (optional): Path to the text file containing Instagram Reels URLs (one per line). Defaults to `reels.txt`.
@@ -43,7 +43,7 @@ node your_script.js [input_file]
 ### Example
 
 ```bash
-node reelsScraper.js reels.txt
+node script.js reels.txt
 ```
 
 ### Notes
@@ -78,7 +78,7 @@ pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-
 ### Usage
 
 ```bash
-python upload_video.py --file VIDEO_FILE --title "Video Title" --client-secrets client_secrets.json [options]
+python upload.py --file VIDEO_FILE --title "Video Title" --client-secrets client_secrets.json [options]
 ```
 
 ### Arguments
@@ -94,7 +94,7 @@ python upload_video.py --file VIDEO_FILE --title "Video Title" --client-secrets 
 ### Example
 
 ```bash
-python upload_video.py --file myvideo.mp4 --title "My Video" --description "Description here" --privacy-status public --tags "tag1,tag2" --client-secrets client_secrets.json
+python upload.py --file myvideo.mp4 --title "My Video" --description "Description here" --privacy-status public --tags "tag1,tag2" --client-secrets client_secrets.json
 ```
 
 ### Notes
