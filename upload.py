@@ -6,11 +6,14 @@ import google_auth_oauthlib.flow
 import googleapiclient.discovery
 import googleapiclient.errors
 from googleapiclient.http import MediaFileUpload
+import google.auth.transport.requests
+from google.oauth2.credentials import Credentials
 
 # Scopes required for uploading videos
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 API_SERVICE_NAME = "youtube"
 API_VERSION = "v3"
+TOKEN_FILE = "token.json"
 
 def get_video_duration(filename: str) -> float:
     """Get video duration in seconds using ffprobe."""
@@ -29,11 +32,30 @@ def get_video_duration(filename: str) -> float:
         return -1  # Unknown duration
 
 def get_authenticated_service(client_secrets_file: str):
-    flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(
-        client_secrets_file, SCOPES)
-    credentials = flow.run_local_server(port=0)
+    creds = None
+    # Load existing credentials from token file if it exists
+    if os.path.exists(TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+
+    # If there are no valid credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(google.auth.transport.requests.Request())
+            except Exception as e:
+                print(f"Failed to refresh token: {e}")
+                creds = None
+        if not creds:
+            flow = google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file(
+                client_secrets_file, SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        # Save the credentials for the next run
+        with open(TOKEN_FILE, 'w') as token:
+            token.write(creds.to_json())
+
     return googleapiclient.discovery.build(
-        API_SERVICE_NAME, API_VERSION, credentials=credentials)
+        API_SERVICE_NAME, API_VERSION, credentials=creds)
 
 def initialize_upload(youtube, options):
     body = {
