@@ -2,8 +2,9 @@ import fs from "fs/promises";
 import { instagramGetUrl } from "instagram-url-direct";
 
 const DATA_FILE = "reelsData.json";
-const MAX_BATCH_SIZE = 15;
-const MAX_TOTAL_ATTEMPTS = 50;
+const HISTORY_FILE = "history.json";
+const MAX_BATCH_SIZE = 1000;
+const MAX_TOTAL_ATTEMPTS = 1000;
 
 async function fetchReels(inputFile) {
   try {
@@ -33,7 +34,7 @@ async function fetchReels(inputFile) {
     // Reverse URLs to start from last line (descending order)
     urls.reverse();
 
-    // Load existing data if available
+    // Load existing data from reelsData.json
     let existingData = {};
     try {
       const existingContent = await fs.readFile(DATA_FILE, "utf-8");
@@ -49,13 +50,33 @@ async function fetchReels(inputFile) {
       }
     }
 
-    // Filter out URLs that already have error entries in existingData
-    let remainingUrls = urls.filter(
-      (url) => !(url in existingData && existingData[url]?.error)
-    );
+    // Load history data from history.json
+    let historyData = {};
+    try {
+      const historyContent = await fs.readFile(HISTORY_FILE, "utf-8");
+      historyData = JSON.parse(historyContent);
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        historyData = {};
+      } else {
+        console.warn(
+          `Warning: Could not parse ${HISTORY_FILE}, starting with empty history. Error: ${err.message}`
+        );
+        historyData = {};
+      }
+    }
+
+    // Combine URLs from existingData and historyData to skip
+    const skipUrls = new Set([
+      ...Object.keys(existingData),
+      ...Object.keys(historyData),
+    ]);
+
+    // Filter out URLs that are already in existingData or historyData
+    let remainingUrls = urls.filter((url) => !skipUrls.has(url));
 
     if (remainingUrls.length === 0) {
-      console.log("No new URLs to process after filtering error URLs.");
+      console.log("No new URLs to process after filtering existing and history URLs.");
       return;
     }
 
@@ -64,7 +85,11 @@ async function fetchReels(inputFile) {
     let attempts = 0;
 
     // We'll try up to MAX_TOTAL_ATTEMPTS URLs, but stop early if we fetch MAX_BATCH_SIZE successfully
-    while (fetchedCount < MAX_BATCH_SIZE && attempts < MAX_TOTAL_ATTEMPTS && remainingUrls.length > 0) {
+    while (
+      fetchedCount < MAX_BATCH_SIZE &&
+      attempts < MAX_TOTAL_ATTEMPTS &&
+      remainingUrls.length > 0
+    ) {
       // Take next URL
       const url = remainingUrls.shift();
       attempts++;
