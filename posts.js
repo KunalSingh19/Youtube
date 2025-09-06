@@ -6,7 +6,7 @@ const HISTORY_FILE = "history.json";
 const MAX_BATCH_SIZE = 1000;
 const MAX_TOTAL_ATTEMPTS = 1000;
 
-async function fetchReels(inputFile) {
+async function fetchReels(inputFile, ascending = false) {
   try {
     // Read the file containing reels URLs
     let fileContent;
@@ -31,8 +31,10 @@ async function fetchReels(inputFile) {
       return;
     }
 
-    // Reverse URLs to start from last line (descending order)
-    urls.reverse();
+    // Reverse URLs only if ascending is false (default behavior)
+    if (!ascending) {
+      urls.reverse();
+    }
 
     // Load existing data from reelsData.json
     let existingData = {};
@@ -135,6 +137,8 @@ async function fetchReels(inputFile) {
 }
 
 // Get input filename from CLI arguments, default to "reels.txt"
+// Third argument "asc" means ascending order, otherwise descending
 const inputFile = process.argv[2] || "reels.txt";
+const ascending = process.argv[3] === "asc";
 
-fetchReels(inputFile);
+fetchReels(inputFile, ascending);
