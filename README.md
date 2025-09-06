@@ -40,6 +40,12 @@ node script.js [input_file]
 
 - `input_file` (optional): Path to the text file containing Instagram Reels URLs (one per line). Defaults to `reels.txt`.
 
+```bash
+node post.js [input_file] asc
+```
+
+- `asc` to start scraping from ascending order. it start scraping from descending as it set
+
 ### Example
 
 ```bash
