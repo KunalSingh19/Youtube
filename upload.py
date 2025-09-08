@@ -5,6 +5,7 @@ import subprocess
 import json
 import re
 import requests
+import hashlib
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 import googleapiclient.errors
@@ -20,7 +21,8 @@ API_VERSION = "v3"
 INSTAGRAM_JSON_FILE = "reelsData.json"
 UPLOAD_HISTORY_FILE = "upload_history.json"
 TOKEN_FILE = "token.json"
-BATCH_SIZE = 65
+BATCH_SIZE = 60
+TMP_FOLDER = "tmp"
 
 def get_video_duration(filename: str) -> float:
     """Get video duration in seconds using ffprobe."""
@@ -66,6 +68,7 @@ def initialize_upload(youtube, options):
             "privacyStatus": options.privacy_status
         }
     }
+    # Remove None values from snippet
     body["snippet"] = {k: v for k, v in body["snippet"].items() if v is not None}
     media = MediaFileUpload(options.file, chunksize=-1, resumable=True)
     request = youtube.videos().insert(
@@ -113,6 +116,11 @@ def extract_tags_from_caption(caption: str):
     unique_tags = list(dict.fromkeys(tags))
     return unique_tags[:30]
 
+def get_unique_filename(insta_url: str) -> str:
+    """Generate a unique filename for each Instagram URL inside the tmp folder."""
+    hash_digest = hashlib.md5(insta_url.encode('utf-8')).hexdigest()
+    return os.path.join(TMP_FOLDER, f"video_{hash_digest}.mp4")
+
 def main():
     parser = argparse.ArgumentParser(description="Download Instagram videos and upload to YouTube")
     parser.add_argument("--client-secrets", required=True, help="Path to client_secrets.json")
@@ -120,6 +128,11 @@ def main():
     parser.add_argument("--category-id", default="22", help="YouTube video category ID (default: 22 = People & Blogs)")
 
     args = parser.parse_args()
+
+    # Create tmp folder if it doesn't exist
+    if not os.path.exists(TMP_FOLDER):
+        os.makedirs(TMP_FOLDER)
+        print(f"Created temporary folder '{TMP_FOLDER}'")
 
     if not os.path.exists(INSTAGRAM_JSON_FILE):
         print(f"Error: Instagram JSON file '{INSTAGRAM_JSON_FILE}' does not exist.")
@@ -154,7 +167,7 @@ def main():
         tags = extract_tags_from_caption(description)
         print(f"Extracted tags from caption: {tags}")
 
-        video_filename = "downloaded_video.mp4"
+        video_filename = get_unique_filename(insta_url)
 
         try:
             download_video(video_url, video_filename)
@@ -172,7 +185,9 @@ def main():
             pass
 
         options = Options()
-        truncated_title = description[:100]
+        truncated_title = description.strip()[:100]
+        if not truncated_title:
+            truncated_title = "#Shorts #YtShorts #Instagram #Reel"
         options.file = video_filename
         options.title = truncated_title
         options.description = description
@@ -185,7 +200,10 @@ def main():
         except googleapiclient.errors.HttpError as e:
             print(f"An HTTP error {e.resp.status} occurred for {insta_url}:\n{e.content}")
             if os.path.exists(video_filename):
-                os.remove(video_filename)
+                try:
+                    os.remove(video_filename)
+                except PermissionError:
+                    print(f"Could not delete {video_filename} because it is in use.")
             continue
 
         upload_history[insta_url] = {
@@ -194,8 +212,11 @@ def main():
         save_upload_history(UPLOAD_HISTORY_FILE, upload_history)
 
         if os.path.exists(video_filename):
-            os.remove(video_filename)
-            print(f"Deleted temporary video file {video_filename}")
+            try:
+                os.remove(video_filename)
+                print(f"Deleted temporary video file {video_filename}")
+            except PermissionError:
+                print(f"Could not delete {video_filename} because it is in use.")
 
         uploaded_count += 1
 
