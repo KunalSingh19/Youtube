@@ -6,6 +6,8 @@ import json
 import re
 import requests
 import hashlib
+import datetime
+import urllib.parse
 import google_auth_oauthlib.flow
 import googleapiclient.discovery
 import googleapiclient.errors
@@ -21,8 +23,26 @@ API_VERSION = "v3"
 INSTAGRAM_JSON_FILE = "reelsData.json"
 UPLOAD_HISTORY_FILE = "upload_history.json"
 TOKEN_FILE = "token.json"
-BATCH_SIZE = 60
+BATCH_SIZE = 5
 TMP_FOLDER = "tmp"
+ERROR_LOG_FILE = "error_log.txt"
+
+def log_error(insta_url: str, error_message: str):
+    timestamp = datetime.datetime.now().isoformat()
+    log_entry = f"[{timestamp}] URL: {insta_url}\nError: {error_message}\n\n"
+    with open(ERROR_LOG_FILE, 'a', encoding='utf-8') as f:
+        f.write(log_entry)
+
+def sanitize_filename(name: str, max_length=100) -> str:
+    """Sanitize string to be a safe filename."""
+    parsed = urllib.parse.urlparse(name)
+    path = parsed.path + ("_" + parsed.query if parsed.query else "")
+    safe_name = re.sub(r'[^A-Za-z0-9._-]', '_', path)
+    if len(safe_name) > max_length:
+        safe_name = safe_name[:max_length]
+    if not safe_name.lower().endswith('.mp4'):
+        safe_name += '.mp4'
+    return safe_name
 
 def get_video_duration(filename: str) -> float:
     """Get video duration in seconds using ffprobe."""
@@ -56,7 +76,7 @@ def get_authenticated_service(client_secrets_file: str):
     return googleapiclient.discovery.build(
         API_SERVICE_NAME, API_VERSION, credentials=creds)
 
-def initialize_upload(youtube, options):
+def initialize_upload(youtube, options, insta_url):
     body = {
         "snippet": {
             "title": options.title,
@@ -68,32 +88,44 @@ def initialize_upload(youtube, options):
             "privacyStatus": options.privacy_status
         }
     }
-    # Remove None values from snippet
     body["snippet"] = {k: v for k, v in body["snippet"].items() if v is not None}
     media = MediaFileUpload(options.file, chunksize=-1, resumable=True)
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body=body,
-        media_body=media
-    )
-    response = None
-    while response is None:
-        status, response = request.next_chunk()
-        if status:
-            print(f"Upload progress: {int(status.progress() * 100)}%")
-    print(f"Upload Complete! Video ID: {response['id']}")
-    return response['id']
 
-def download_video(url: str, filename: str):
+    try:
+        request = youtube.videos().insert(
+            part="snippet,status",
+            body=body,
+            media_body=media
+        )
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                print(f"Upload progress: {int(status.progress() * 100)}%")
+        print(f"Upload Complete! Video ID: {response['id']}")
+        return response['id']
+    except googleapiclient.errors.HttpError as e:
+        error_content = e.content.decode() if isinstance(e.content, bytes) else str(e.content)
+        log_error(insta_url, f"HTTP error {e.resp.status}: {error_content}")
+        raise
+    except Exception as e:
+        log_error(insta_url, f"Unexpected upload error: {e}")
+        raise
+
+def download_video(url: str, filename: str, insta_url: str):
     print(f"Downloading video from {url} ...")
-    response = requests.get(url, stream=True)
-    if response.status_code != 200:
-        raise Exception(f"Failed to download video, status code: {response.status_code}")
-    with open(filename, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-    print(f"Video downloaded to {filename}")
+    try:
+        response = requests.get(url, stream=True, timeout=30)
+        if response.status_code != 200:
+            raise Exception(f"Status code {response.status_code}")
+        with open(filename, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        print(f"Video downloaded to {filename}")
+    except Exception as e:
+        log_error(insta_url, f"Download error: {e}")
+        raise
 
 def load_instagram_json(json_path: str):
     with open(json_path, 'r', encoding='utf-8') as f:
@@ -117,9 +149,13 @@ def extract_tags_from_caption(caption: str):
     return unique_tags[:30]
 
 def get_unique_filename(insta_url: str) -> str:
-    """Generate a unique filename for each Instagram URL inside the tmp folder."""
-    hash_digest = hashlib.md5(insta_url.encode('utf-8')).hexdigest()
-    return os.path.join(TMP_FOLDER, f"video_{hash_digest}.mp4")
+    base_name = sanitize_filename(insta_url)
+    full_path = os.path.join(TMP_FOLDER, base_name)
+    if os.path.exists(full_path):
+        hash_suffix = hashlib.md5(insta_url.encode('utf-8')).hexdigest()[:6]
+        name, ext = os.path.splitext(base_name)
+        full_path = os.path.join(TMP_FOLDER, f"{name}_{hash_suffix}{ext}")
+    return full_path
 
 def main():
     parser = argparse.ArgumentParser(description="Download Instagram videos and upload to YouTube")
@@ -129,7 +165,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Create tmp folder if it doesn't exist
     if not os.path.exists(TMP_FOLDER):
         os.makedirs(TMP_FOLDER)
         print(f"Created temporary folder '{TMP_FOLDER}'")
@@ -161,7 +196,9 @@ def main():
             video_url = post_data['media_details'][0]['url']
             description = post_data['post_info'].get('caption', '')
         except (KeyError, IndexError) as e:
-            print(f"Error parsing Instagram JSON for {insta_url}: {e}")
+            error_msg = f"Error parsing Instagram JSON: {e}"
+            print(error_msg)
+            log_error(insta_url, error_msg)
             continue
 
         tags = extract_tags_from_caption(description)
@@ -170,7 +207,7 @@ def main():
         video_filename = get_unique_filename(insta_url)
 
         try:
-            download_video(video_url, video_filename)
+            download_video(video_url, video_filename, insta_url)
         except Exception as e:
             print(f"Error downloading video for {insta_url}: {e}")
             continue
@@ -196,9 +233,9 @@ def main():
         options.category_id = args.category_id
 
         try:
-            video_id = initialize_upload(youtube, options)
-        except googleapiclient.errors.HttpError as e:
-            print(f"An HTTP error {e.resp.status} occurred for {insta_url}:\n{e.content}")
+            video_id = initialize_upload(youtube, options, insta_url)
+        except Exception as e:
+            print(f"Upload failed for {insta_url}: {e}")
             if os.path.exists(video_filename):
                 try:
                     os.remove(video_filename)
