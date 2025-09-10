@@ -3,8 +3,8 @@ import { instagramGetUrl } from "instagram-url-direct";
 
 const DATA_FILE = "reelsData.json";
 const HISTORY_FILE = "history.json";
-const MAX_BATCH_SIZE = 1000;
-const MAX_TOTAL_ATTEMPTS = 1000;
+const MAX_BATCH_SIZE = 100;
+const MAX_TOTAL_ATTEMPTS = 200;
 
 async function fetchReels(inputFile, ascending = false) {
   try {
